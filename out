@@ -1,0 +1,13 @@
+ONSET
+true ##
+ONSET
+true +2
+ONSET
+true -2
+ONSET
+true KB
+2	##
+12	+2
+24	-2
+36	KB
+: ## ;    : +2 2 + ;  : -2 2 - ;  : KB 40 10 * ;      ##_THIS_IS_A_COMMENT_##  40 02 * KB +2 -1                              

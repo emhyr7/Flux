@@ -1,0 +1,13 @@
+[ ] compress source.
+
+
+	mark bytes by either space or letter.
+	if there is a single letter, mark its next byte as a letter.
+	at this point, there are 2 different markers:
+		- 0: space.
+		- 1: letter.
+	we then sort such that the letters are moved to the front, and
+	the spaces are moved to the back.
+
+	scanning a word would then just be reading 2 bytes.
+

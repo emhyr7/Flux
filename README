@@ -1,0 +1,10 @@
+FLUX: DATA-PARALLEL FORTH-LIKE INTERPRETED PROGRAMMING LANGUAGE
+
+
+
+FLUX is a data-parallel Forth-like langauge for programming.
+
+
+
+A Flux program is invoked per element of some buffer and each invocation
+effectively executes in parallel, similar to kernels in GPU programming.
