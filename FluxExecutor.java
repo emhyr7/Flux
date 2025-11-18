@@ -18,7 +18,7 @@ public class FluxExecutor
 		DIV,
 		SYNC,
 		BACK,
-		JUMP,
+		SKIP,
 	}
 
 
@@ -31,7 +31,7 @@ public class FluxExecutor
 
 	public static final byte CHARACTER_SPACE=' ';
 
-	public static final int WORD_INDEX_BUILTIN=-1;
+	public static final int WORD_OFFSET_BUILTIN=-1;
 
 ////  PROPERTIES  //////////////////////////////////////////////////////////////
 
@@ -43,7 +43,7 @@ public class FluxExecutor
 	private Thread[]      thread_pool;
 	private CyclicBarrier thread_pool_barrier;
 
-	private int[] word_caret_table=new int[WORD_COUNT_MAX];
+	private int[] word_offset_table=new int[WORD_COUNT_MAX];
 
 	private final short[] BUILTIN_WORD_INDEX_LIST=new short[]
 	{
@@ -72,12 +72,45 @@ public class FluxExecutor
 		this.thread_pool        =new Thread[lane_count];
 		this.thread_pool_barrier=new CyclicBarrier(lane_count);
 
-		// TODO: initialize the word index table with builtin words.
-
+		//enter builtin words.
 		for(short word_index:BUILTIN_WORD_INDEX_LIST)
 		{
-			this.word_caret_table[word_index]=0;
+			this.word_offset_table[word_index]=WORD_OFFSET_BUILTIN;
 		}
+
+		//enter builtin words: hexadecimals.
+		for(int i=0;i<0xFF;i+=1)
+		{
+			int d,a,b,l,h,v;
+
+			//NOTE: probably faster to load from a read-only table instead of compute.
+			//it would fit within L1d$; latency of ~3 cycles per load.
+
+			//lower half
+			d=(i&0x0F)>>0;
+			a='0'+d%10;
+			b='A'+d% 6;
+			l=d/10>0?b:a;
+
+			//higher half
+			d=(i&0xF0)>>4;
+			a='0'+d%10;
+			b='A'+d% 6;
+			h=d/10>0?b:a;
+
+			//combine
+			v=(l<<0)|(h<<8);
+
+			//store
+			this.word_offset_table[v]=WORD_OFFSET_BUILTIN;
+		}
+
+		/* NOTE: confirm that the builtin words are entered
+		for(int i=0;i<WORD_COUNT_MAX;i+=1)
+		{
+			if(word_offset_table[i]==WORD_OFFSET_BUILTIN)System.out.println("" + (char)(i&0xFF) + " " + (char)((i&0xFF00)>>8));
+		}
+		*/
 	}
 
 	public Status execute(int[][] source_buffer_pool)
@@ -85,6 +118,100 @@ public class FluxExecutor
 		Status status;
 
 		status=Status.SUCCESSFUL;
+
+
+		// compress into a sequence of 
+
+
+		// identify characters that are letters.
+
+		for(int i=0;i<this.source.length;i+=1)
+		{
+			byte character;
+
+			character=this.source[i];
+			character=character<CHARACTER_SPACE?CHARACTER_NULL:character;
+
+			this.source[i]=character;
+		}
+
+		//
+		// identify single-letter words
+		//
+		// to compress words together, and eliminate extraneous spaces.
+		//
+
+
+		byte word_marks=new byte[this.source.length];
+
+
+		// NOTE: we must ensure that the next space of a single-letter word is
+		// included.
+		
+		// NOTE: we also must ensure the letters pass the first two characters of a
+		// word are ignored.
+
+		for(int i=0;i<this.source.length;i+=1)
+		{
+			int batch;
+			boolean is_single_letter;
+
+			// load 4 bytes as 64-bit word
+			batch=this.source[i+0]<< 0;
+			batch=this.source[i+1]<< 8;
+			batch=this.source[i+2]<<16;
+			batch=this.source[i+4]<<24;
+
+			// check if the batch contains a single letter
+			is_single_letter =(batch>> 0)&0xFF)==CHARACTER_NULL;
+			is_single_letter&=(batch>> 8)&0xFF)!=CHARACTER_NULL;
+			is_single_letter&=(batch>>16)&0xFF)==CHARACTER_NULL;
+
+			// ...
+			batch|=is_single_letter?CHARACTER_SPACE<<16:0;
+
+			// store
+			this.source[i+0]=(batch>> 0)&0xFF;
+			this.source[i+1]=(batch>> 8)&0xFF;
+			this.source[i+2]=(batch>>16)&0xFF;
+			this.source[i+3]=(batch>>24)&0xFF;
+		}
+
+		// nullify the extraneous letters after the first two characters of a word.
+		// NOTE: this will be done serially for convenience sake (skill issue)...
+		// but this is parallelizable.
+
+
+		// all i need to is mark the first letter of a sequence of letters.
+
+		// mark all letters.
+		// if the previous character is not a letter, keep the letter marked.
+		// otherwise, unmark it.
+		
+		for(int i=0;i<this.source.length;i+=1)
+		{
+			int batch;
+			boolean do_mark;
+
+			batch=this.source[i+0]<< 0;
+			batch=this.source[i+1]<< 8;
+			batch=this.source[i+2]<<16;
+			batch=this.source[i+4]<<24;
+
+			do_mark =((batch>> 0)&0xFF)==CHARACTER_NULL;
+			do_mark&=((batch>> 8)&0xFF)!=CHARACTER_NULL;
+
+			
+		}
+
+		//TODO: sort such that the null bytes are moved towards the back.
+		for(int i=0;i<this.source.length;i+=1)
+		{
+
+		}
+
+
+		/*
 
 		int lane_index,lane_data_stack_offset,lane_jump_stack_offset,current_source_position;
 
@@ -96,6 +223,21 @@ public class FluxExecutor
 
 		lane_index=0;
 		current_source_position=0;
+
+
+
+		word=get_word();
+
+		new_positoin=dictionary[word];
+
+		current_positoin=new_positoin;
+
+		//TODO: do this before executing each word:
+		//  this.lane_jump_stack[lane_jump_stack_offset++]=current_source_position;
+
+		//recursively derive the builtin words.
+
+		// execute the builtin word.
 
 		switch(builtin_word)
 		{
@@ -185,18 +327,17 @@ public class FluxExecutor
 
 				break;
 			}
-		case BuiltinWord.JUMP:
+		case BuiltinWord.SKIP:
 			{
-				try
-				{
-					this.thread_pool_barrier.await();
-				}
-				catch(Exception e)
-				{
-					// ignore.
-				}
+				//TODO: skip until after the ;
 
-				this.lane_jump_stack[lane_jump_stack_offset++]=current_source_position;
+				do
+				{
+					word=next_word();
+				}
+				while(word!=BuiltinWord.BACK);
+
+				next_word();
 
 				break;
 			}
@@ -212,6 +353,7 @@ public class FluxExecutor
 			}
 		}
 
+			*/
 		return status;
 	}
 }
