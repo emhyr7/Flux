@@ -29,9 +29,11 @@ public class FluxExecutor
 	public static final int WORD_COUNT_MAX=1<<16; // 64 kB
 	public static final int WORD_SIZE_MAX =1<< 1; // 2   B
 
+	public static final int WORD_OFFSET_BUILTIN=-1;
+
+	public static final byte CHARACTER_NULL ='\0';
 	public static final byte CHARACTER_SPACE=' ';
 
-	public static final int WORD_OFFSET_BUILTIN=-1;
 
 ////  PROPERTIES  //////////////////////////////////////////////////////////////
 
@@ -62,9 +64,21 @@ public class FluxExecutor
 
 ////  METHODS  /////////////////////////////////////////////////////////////////
 
+	static int alignr(int a,int b)
+	{
+		assert((b%2)==0);
+
+		int c=a&(b-1);
+		c=c!=0?b-c:0;
+		return a+c;
+	}
+
 	public FluxExecutor(byte[] source,int lane_count,int data_stack_length,int jump_stack_length)
 	{
-		this.source=source;
+		this.source=new byte[alignr(1+source.length+64,64)];
+
+		System.arraycopy(source,0,this.source,1,source.length);
+		this.source[0]=CHARACTER_NULL;
 
 		this.lane_data_stack_table=new int[lane_count][PADDING_SIZE+data_stack_length+PADDING_SIZE];
 		this.lane_jump_stack      =new int[PADDING_SIZE+jump_stack_length+PADDING_SIZE];
@@ -119,31 +133,47 @@ public class FluxExecutor
 
 		status=Status.SUCCESSFUL;
 
+		this.print_source("INITIAL");
 
-		// compress into a sequence of 
-
-
-		// identify characters that are letters.
-
+		//
+		// nullify characters that are classified as SPACE.
+		//
 		for(int i=0;i<this.source.length;i+=1)
 		{
 			byte character;
 
 			character=this.source[i];
-			character=character<CHARACTER_SPACE?CHARACTER_NULL:character;
+
+			// erase all characters classified as SPACE to NULL.
+			// NOTE: a character is classified as SPACE if its value is less-than or equal-to `CHARACTER_SPACE`.
+			character=character<=CHARACTER_SPACE?CHARACTER_NULL:character;
 
 			this.source[i]=character;
 		}
+		this.print_source("SPACE->NULL");
+
+		byte[] word_marks=new byte[this.source.length];
 
 		//
-		// identify single-letter words
+		// mark each word.
 		//
-		// to compress words together, and eliminate extraneous spaces.
-		//
+		for(int i=0;i<this.source.length-1;i+=1)
+		{
+			int     batch,marks;
+			boolean is_word;
 
+			batch =this.source[i+0]<<(0*8);
+			batch|=this.source[i+1]<<(1*8);
 
-		byte word_marks=new byte[this.source.length];
+			is_word =((batch>>(0*8))&0xFF)==CHARACTER_NULL;
+			is_word&=((batch>>(1*8))&0xFF)!=CHARACTER_NULL;
 
+			marks=(is_word?0b11:0)<<((i+1)%8);
+
+			word_marks[(i+1)/8+0]|=(byte)((marks>>(0*8))&0xFF);
+			word_marks[(i+1)/8+1]|=(byte)((marks>>(1*8))&0xFF);
+		}
+		this.print_source("MARK WORDS");
 
 		// NOTE: we must ensure that the next space of a single-letter word is
 		// included.
@@ -151,31 +181,55 @@ public class FluxExecutor
 		// NOTE: we also must ensure the letters pass the first two characters of a
 		// word are ignored.
 
-		for(int i=0;i<this.source.length;i+=1)
+
+
+		//
+		// handle single-character words.
+		//
+		for(int i=0;i<this.source.length-3;i+=1)
 		{
-			int batch;
-			boolean is_single_letter;
+			int     batch;
+			byte    marks;
+			boolean is_single;
 
-			// load 4 bytes as 64-bit word
-			batch=this.source[i+0]<< 0;
-			batch=this.source[i+1]<< 8;
-			batch=this.source[i+2]<<16;
-			batch=this.source[i+4]<<24;
+			// load a batch of 4 bytes as a 64-bit WORD.
+			batch =this.source[i+0]<<(0*8);
+			batch|=this.source[i+1]<<(1*8);
+			batch|=this.source[i+2]<<(2*8);
+			batch|=this.source[i+3]<<(3*8); // NOTE: this last byte is extarneous.
 
-			// check if the batch contains a single letter
-			is_single_letter =(batch>> 0)&0xFF)==CHARACTER_NULL;
-			is_single_letter&=(batch>> 8)&0xFF)!=CHARACTER_NULL;
-			is_single_letter&=(batch>>16)&0xFF)==CHARACTER_NULL;
+			// check if the batch contains a single-character word.
+			is_single =((batch>>(0*8))&0xFF)==CHARACTER_NULL;
+			is_single|=((batch>>(0*8))&0xFF)==CHARACTER_SPACE;
+			is_single&=((batch>>(1*8))&0xFF)!=CHARACTER_NULL;
+			is_single&=((batch>>(2*8))&0xFF)==CHARACTER_NULL;
 
-			// ...
-			batch|=is_single_letter?CHARACTER_SPACE<<16:0;
+			// set the byte after the single-character to SPACE, if applicable.
+			batch|=is_single?(CHARACTER_SPACE<<(2*8)):0;
 
-			// store
-			this.source[i+0]=(batch>> 0)&0xFF;
-			this.source[i+1]=(batch>> 8)&0xFF;
-			this.source[i+2]=(batch>>16)&0xFF;
-			this.source[i+3]=(batch>>24)&0xFF;
+			this.source[i+0]=(byte)(batch>>(0*8));
+			this.source[i+1]=(byte)(batch>>(1*8));
+			this.source[i+2]=(byte)(batch>>(2*8));
+			this.source[i+3]=(byte)(batch>>(3*8));
 		}
+		this.print_source("ADD SPACE TO SINGLE-LETTER WORDS");
+
+		for(int i=1;i<this.source.length;i+=1)
+		{
+			int character,marks;
+			boolean mark;
+
+			marks=word_marks[i/8];
+			mark =(marks&(1<<(i%8)))!=0;
+
+			character=this.source[i];
+			character=mark?character:CHARACTER_NULL;
+
+			this.source[i]=(byte)character;
+		}
+
+		this.print_source("IGNORE WORDS WITH MORE THAN 2 LETTERS");
+
 
 		// nullify the extraneous letters after the first two characters of a word.
 		// NOTE: this will be done serially for convenience sake (skill issue)...
@@ -184,31 +238,8 @@ public class FluxExecutor
 
 		// all i need to is mark the first letter of a sequence of letters.
 
-		// mark all letters.
-		// if the previous character is not a letter, keep the letter marked.
-		// otherwise, unmark it.
-		
-		for(int i=0;i<this.source.length;i+=1)
-		{
-			int batch;
-			boolean do_mark;
-
-			batch=this.source[i+0]<< 0;
-			batch=this.source[i+1]<< 8;
-			batch=this.source[i+2]<<16;
-			batch=this.source[i+4]<<24;
-
-			do_mark =((batch>> 0)&0xFF)==CHARACTER_NULL;
-			do_mark&=((batch>> 8)&0xFF)!=CHARACTER_NULL;
-
-			
-		}
-
+		// include next byte after the marked bytes.
 		//TODO: sort such that the null bytes are moved towards the back.
-		for(int i=0;i<this.source.length;i+=1)
-		{
-
-		}
 
 
 		/*
@@ -355,5 +386,22 @@ public class FluxExecutor
 
 			*/
 		return status;
+	}
+
+	private void print_source(byte[] buffer, String pass)
+	{
+		System.out.println("\n#### "+pass);
+		for(int i=0;i<buffer.length;i+=1)
+		{
+			byte c=buffer[i];
+			if(c!=0)System.out.print((char)c);
+			//else System.out.print('\\');
+		}
+		System.out.println();
+	}
+
+	private void print_source(String pass)
+	{
+		this.print_source(this.source,pass);
 	}
 }

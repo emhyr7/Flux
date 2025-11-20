@@ -11,3 +11,16 @@
 
 	scanning a word would then just be reading 2 bytes.
 
+
+
+
+
+
+
+
+if the current character is marked as the start of a WORD,
+do not nullify.
+
+
+
+

@@ -25,6 +25,10 @@ public class Flux
 
 		flux_executor=new FluxExecutor(source,lane_count,data_stack_length,jump_stack_length);
 
+		int[][] source_buffer_pool=new int[2][1024];
+
+		flux_executor.execute(source_buffer_pool);
+
 		/*
 		flux_executor=new FluxExecutor(source,lane_count,buffer_count,buffer_sizes,buffer_index,dstack_size,jstack_size);
 		flux_status  =flux_executor.execute(buffer, buffer_size);
