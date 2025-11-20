@@ -136,7 +136,7 @@ public class FluxExecutor
 		this.print_source("INITIAL");
 
 		//
-		// nullify characters that are classified as SPACE.
+		// nullify characters that are classified as a space.
 		//
 		for(int i=0;i<this.source.length;i+=1)
 		{
@@ -184,7 +184,7 @@ public class FluxExecutor
 
 
 		//
-		// handle single-character words.
+		// replace the next byte of a single-letter word with a space.
 		//
 		for(int i=0;i<this.source.length-3;i+=1)
 		{
@@ -214,6 +214,9 @@ public class FluxExecutor
 		}
 		this.print_source("ADD SPACE TO SINGLE-LETTER WORDS");
 
+		//
+		// exclude letters past the first two letters of each word.
+		//
 		for(int i=1;i<this.source.length;i+=1)
 		{
 			int character,marks;
@@ -229,6 +232,47 @@ public class FluxExecutor
 		}
 
 		this.print_source("IGNORE WORDS WITH MORE THAN 2 LETTERS");
+
+		boolean sorted;
+		do{
+			sorted=true;
+			for(int i=1;i<this.source.length-1;i+=2)
+			{
+				if((this.source[i]==CHARACTER_NULL?1:0)>(this.source[i+1]==CHARACTER_NULL?1:0))
+				{
+					byte t=this.source[i+1];
+					this.source[i+1]=this.source[i];
+					this.source[i]=t;
+					sorted=false;
+				}
+			}
+
+			for(int i=0;i<this.source.length-1;i+=2)
+			{
+				if((this.source[i]==CHARACTER_NULL?1:0)>(this.source[i+1]==CHARACTER_NULL?1:0))
+				{
+					byte t=this.source[i+1];
+					this.source[i+1]=this.source[i];
+					this.source[i]=t;
+					sorted=false;
+				}
+			}
+		}while(!sorted);
+
+		this.print_source("SORTED");
+
+		for(int i=0;i<this.source.length;i+=1)
+		{
+			byte character;
+
+			character=this.source[i];
+
+			character=character==CHARACTER_SPACE?CHARACTER_NULL:character;
+
+			this.source[i]=character;
+		}
+
+		this.print_source("SPACE->NULL");
 
 
 		// nullify the extraneous letters after the first two characters of a word.
@@ -395,7 +439,7 @@ public class FluxExecutor
 		{
 			byte c=buffer[i];
 			if(c!=0)System.out.print((char)c);
-			//else System.out.print('\\');
+			else System.out.print('\\');
 		}
 		System.out.println();
 	}
