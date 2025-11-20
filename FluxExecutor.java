@@ -1,5 +1,7 @@
 import java.util.concurrent.CyclicBarrier;
 
+// TODO: use a `ByteBuffer` instead of a `byte[]`
+
 public class FluxExecutor
 {
 
@@ -21,7 +23,6 @@ public class FluxExecutor
 		SKIP,
 	}
 
-
 ////  CONSTANTS  ///////////////////////////////////////////////////////////////
 
 	public static final int PADDING_SIZE=1<<6; // 64 B
@@ -39,27 +40,37 @@ public class FluxExecutor
 
 	private byte[] source;
 
-	private int[][] lane_data_stack_table;
-	private int[]   lane_jump_stack;
+	private int[][] lane_stack_table;
 
 	private Thread[]      thread_pool;
 	private CyclicBarrier thread_pool_barrier;
 
+	// NOTE: offset by words, not by bytes.
 	private int[] word_offset_table=new int[WORD_COUNT_MAX];
+
+	private short BUILTIN_WORD_ST  =('.'<<0)|(' '<<8);
+	private short BUILTIN_WORD_LD  =('@'<<0)|(' '<<8);
+	private short BUILTIN_WORD_SYNC=('='<<0)|(' '<<8);
+	private short BUILTIN_WORD_DEF =(':'<<0)|(' '<<8);
+	private short BUILTIN_WORD_RET =(';'<<0)|(' '<<8);
+	private short BUILTIN_WORD_ADD =('+'<<0)|(' '<<8);
+	private short BUILTIN_WORD_SUB =('-'<<0)|(' '<<8);
+	private short BUILTIN_WORD_MUL =('*'<<0)|(' '<<8);
+	private short BUILTIN_WORD_DIV =('/'<<0)|(' '<<8);
+	private short BUILTIN_WORD_REM =('%'<<0)|(' '<<8);
 
 	private final short[] BUILTIN_WORD_INDEX_LIST=new short[]
 	{
-		('.'<<0)|(' '<<8), // store
-		('@'<<0)|(' '<<8), // load
-		('='<<0)|(' '<<8), // synchronize
-		(':'<<0)|(' '<<8), // branch
-		(';'<<0)|(' '<<8), // return
-		('+'<<0)|(' '<<8), // add
-		('-'<<0)|(' '<<8), // subtract
-		('*'<<0)|(' '<<8), // multiply
-		('/'<<0)|(' '<<8), // divide
-		('%'<<0)|(' '<<8), // remainder
-		('$'<<0)|(' '<<8), // print [monayyy]
+		BUILTIN_WORD_ST,
+		BUILTIN_WORD_LD,
+		BUILTIN_WORD_SYNC,
+		BUILTIN_WORD_DEF,
+		BUILTIN_WORD_RET,
+		BUILTIN_WORD_ADD,
+		BUILTIN_WORD_SUB,
+		BUILTIN_WORD_MUL,
+		BUILTIN_WORD_DIV,
+		BUILTIN_WORD_REM,
 	};
 
 ////  METHODS  /////////////////////////////////////////////////////////////////
@@ -73,15 +84,14 @@ public class FluxExecutor
 		return a+c;
 	}
 
-	public FluxExecutor(byte[] source,int lane_count,int data_stack_length,int jump_stack_length)
+	public FluxExecutor(byte[] source,int lane_count,int stack_length)
 	{
 		this.source=new byte[alignr(1+source.length+64,64)];
 
 		System.arraycopy(source,0,this.source,1,source.length);
 		this.source[0]=CHARACTER_NULL;
 
-		this.lane_data_stack_table=new int[lane_count][PADDING_SIZE+data_stack_length+PADDING_SIZE];
-		this.lane_jump_stack      =new int[PADDING_SIZE+jump_stack_length+PADDING_SIZE];
+		this.lane_stack_table=new int[lane_count][PADDING_SIZE+stack_length+PADDING_SIZE];
 
 		this.thread_pool        =new Thread[lane_count];
 		this.thread_pool_barrier=new CyclicBarrier(lane_count);
@@ -133,11 +143,12 @@ public class FluxExecutor
 
 		status=Status.SUCCESSFUL;
 
-		this.print_source("INITIAL");
+		this.print_source("initial state.");
 
 		//
 		// nullify characters that are classified as a space.
 		//
+		this.sync();
 		for(int i=0;i<this.source.length;i+=1)
 		{
 			byte character;
@@ -150,13 +161,14 @@ public class FluxExecutor
 
 			this.source[i]=character;
 		}
-		this.print_source("SPACE->NULL");
+		this.print_source("nullify characters that are classified as a space.");
 
 		byte[] word_marks=new byte[this.source.length];
 
 		//
 		// mark each word.
 		//
+		this.sync();
 		for(int i=0;i<this.source.length-1;i+=1)
 		{
 			int     batch,marks;
@@ -173,7 +185,7 @@ public class FluxExecutor
 			word_marks[(i+1)/8+0]|=(byte)((marks>>(0*8))&0xFF);
 			word_marks[(i+1)/8+1]|=(byte)((marks>>(1*8))&0xFF);
 		}
-		this.print_source("MARK WORDS");
+		this.print_source("mark each word");
 
 		// NOTE: we must ensure that the next space of a single-letter word is
 		// included.
@@ -186,6 +198,7 @@ public class FluxExecutor
 		//
 		// replace the next byte of a single-letter word with a space.
 		//
+		this.sync();
 		for(int i=0;i<this.source.length-3;i+=1)
 		{
 			int     batch;
@@ -193,18 +206,23 @@ public class FluxExecutor
 			boolean is_single;
 
 			// load a batch of 4 bytes as a 64-bit WORD.
+			// NOTE: probably better to use `ByteBuffer`, i believe.
 			batch =this.source[i+0]<<(0*8);
 			batch|=this.source[i+1]<<(1*8);
 			batch|=this.source[i+2]<<(2*8);
 			batch|=this.source[i+3]<<(3*8); // NOTE: this last byte is extarneous.
 
 			// check if the batch contains a single-character word.
+			// NOTE: which is indicated by {NULL|SPACE,!NULL,NULL}
+			// NOTE: the first byte might also be a SPACE because we're
+			// storing back into the source which causes interferece for subsequent iteratoins.
 			is_single =((batch>>(0*8))&0xFF)==CHARACTER_NULL;
 			is_single|=((batch>>(0*8))&0xFF)==CHARACTER_SPACE;
 			is_single&=((batch>>(1*8))&0xFF)!=CHARACTER_NULL;
 			is_single&=((batch>>(2*8))&0xFF)==CHARACTER_NULL;
 
 			// set the byte after the single-character to SPACE, if applicable.
+			// NOTE: we just OR the SPACE in because the byte is expeced to be NULL.
 			batch|=is_single?(CHARACTER_SPACE<<(2*8)):0;
 
 			this.source[i+0]=(byte)(batch>>(0*8));
@@ -212,11 +230,13 @@ public class FluxExecutor
 			this.source[i+2]=(byte)(batch>>(2*8));
 			this.source[i+3]=(byte)(batch>>(3*8));
 		}
-		this.print_source("ADD SPACE TO SINGLE-LETTER WORDS");
+		this.print_source("replace the next byte of a single-letter word with a space.");
 
 		//
 		// exclude letters past the first two letters of each word.
 		//
+
+		this.sync();
 		for(int i=1;i<this.source.length;i+=1)
 		{
 			int character,marks;
@@ -225,18 +245,34 @@ public class FluxExecutor
 			marks=word_marks[i/8];
 			mark =(marks&(1<<(i%8)))!=0;
 
+			// literally just nullify bytes that aren't marked.
+
 			character=this.source[i];
 			character=mark?character:CHARACTER_NULL;
 
 			this.source[i]=(byte)character;
 		}
 
-		this.print_source("IGNORE WORDS WITH MORE THAN 2 LETTERS");
+		this.print_source("exclude letters past the first two letters of each word.");
+
+		//
+		// sieve the NULL bytes to the back.
+		//
+
+
+		//
+		// odd-even sort (BADD)
+		//
+		// NOTE: the ratoinale is for when this is ported to GLSL.
+		//
 
 		boolean sorted;
+		this.sync();
 		do{
 			boolean swap;
 			byte a,b,c;
+
+			// TODO: this shit is lazy.
 
 			sorted=true;
 			for(int i=1;i<this.source.length-1;i+=2)
@@ -264,7 +300,61 @@ public class FluxExecutor
 			}
 		}while(!sorted);
 
-		this.print_source("SORTED");
+		this.print_source("sieve the NULL bytes to the back.");
+
+		//
+		// identify every definition.
+		//
+
+		// NOTE: essentially, for each `BUILTIN_WORD_DEFINE`, mark the next word.
+
+
+
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!//
+//                  FOR NOW, WE ARE GONNA DO IT LAZILY.                       //
+//                !!! JUST SERIALLY PROCESS THIS SHIT !!!                     //
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!//
+
+		int word_count;
+
+		// get the word count.
+
+		this.sync();
+		{
+			int i;
+
+			word_count=0;
+
+			for(i=0;i<this.source.length;i+=2)
+			{
+				byte    character;
+				boolean is_end;
+
+				character=this.source[i];
+				is_end=character==CHARACTER_NULL;
+				word_count+=is_end?0:1;
+			}
+		}
+
+		this.sync();
+		for(int i=0;i<word_count;i+=1)
+		{
+			short   current_word,word_word;
+			boolean do_define;
+
+			current_word =(short)(this.source[i*2+0]<<(0*8));
+			current_word|=(short)(this.source[i*2+1]<<(1*8));
+
+			if(current_word==BUILTIN_WORD_DEF)
+			{
+				word_word =(short)(this.source[(i+1)*2+0]<<(0*8));
+				word_word|=(short)(this.source[(i+1)*2+1]<<(1*8));
+
+				this.word_offset_table[word_word]=i+1;
+			}
+		}
+
+		// TODO: inline all words.
 
 		// nullify the extraneous letters after the first two characters of a word.
 		// NOTE: this will be done serially for convenience sake (skill issue)...
@@ -438,5 +528,10 @@ public class FluxExecutor
 	private void print_source(String pass)
 	{
 		this.print_source(this.source,pass);
+	}
+
+	private void sync()
+	{
+		// dummb.
 	}
 }
