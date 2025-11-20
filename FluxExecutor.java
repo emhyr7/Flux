@@ -235,45 +235,36 @@ public class FluxExecutor
 
 		boolean sorted;
 		do{
+			boolean swap;
+			byte a,b,c;
+
 			sorted=true;
 			for(int i=1;i<this.source.length-1;i+=2)
 			{
-				if((this.source[i]==CHARACTER_NULL?1:0)>(this.source[i+1]==CHARACTER_NULL?1:0))
-				{
-					byte t=this.source[i+1];
-					this.source[i+1]=this.source[i];
-					this.source[i]=t;
-					sorted=false;
-				}
+				swap=(this.source[i]==CHARACTER_NULL?1:0)>(this.source[i+1]==CHARACTER_NULL?1:0);
+
+				a=this.source[i+0];
+				b=this.source[i+1];
+				this.source[i+(swap?1:0)]=a;
+				this.source[i+(swap?0:1)]=b;
+
+				sorted=swap?false:sorted;
 			}
 
 			for(int i=0;i<this.source.length-1;i+=2)
 			{
-				if((this.source[i]==CHARACTER_NULL?1:0)>(this.source[i+1]==CHARACTER_NULL?1:0))
-				{
-					byte t=this.source[i+1];
-					this.source[i+1]=this.source[i];
-					this.source[i]=t;
-					sorted=false;
-				}
+				swap=(this.source[i]==CHARACTER_NULL?1:0)>(this.source[i+1]==CHARACTER_NULL?1:0);
+
+				a=this.source[i+0];
+				b=this.source[i+1];
+				this.source[i+(swap?1:0)]=a;
+				this.source[i+(swap?0:1)]=b;
+
+				sorted=swap?false:sorted;
 			}
 		}while(!sorted);
 
 		this.print_source("SORTED");
-
-		for(int i=0;i<this.source.length;i+=1)
-		{
-			byte character;
-
-			character=this.source[i];
-
-			character=character==CHARACTER_SPACE?CHARACTER_NULL:character;
-
-			this.source[i]=character;
-		}
-
-		this.print_source("SPACE->NULL");
-
 
 		// nullify the extraneous letters after the first two characters of a word.
 		// NOTE: this will be done serially for convenience sake (skill issue)...
