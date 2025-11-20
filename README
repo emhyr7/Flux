@@ -15,12 +15,8 @@ The final words are schedulad to maintain constant-time execution.
 This code is written such that it can be ported to execute in the GPU, via GLSL.
 
 
-i'm developing a data-parallel constant-time engine for scripting that uses a
-Forth-like language. i plan to have all the words ("words" are essentially
-functions in Forth) preemptively scheduled between stages and ticks. each stage
-corresponds to an elementary function/word.
 
-this is literally just like how processors break instructions into micro-ops (my elementary words),
+This is literally just like how processors break instructions into micro-ops (my elementary words),
 then schedule them to execution units (stages) and cycles (ticks).
 
 
