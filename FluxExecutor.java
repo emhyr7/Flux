@@ -520,7 +520,7 @@ public class FluxExecutor
 		{
 			byte c=buffer[i];
 			if(c!=0)System.out.print((char)c);
-			else System.out.print('\\');
+			//else System.out.print('\\');
 		}
 		System.out.println();
 	}
