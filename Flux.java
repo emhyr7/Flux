@@ -1,36 +1,49 @@
+// SPDX-License-Identifier: MIT
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public class Flux
 {
-    public static void main(String[] args) throws Exception
-    {
-        //NOTE: the first arg is the source_path
-        assert(args.length>0);
+	// read the commandline and execute the given script.
+	public static void main(String[] args) throws Exception
+	{
+		if(args.length<1)throw new Exception("a path to a source file must be given.");
 
-        Path         source_path;
-        byte[]       source;
-        FluxExecutor flux_executor;
-        FluxStatus   flux_status;
+		//
+		// read the source file.
+		// ---------------------
+		//
+		// the first argument should be the path to the source file.
+		//
 
-        source_path=Paths.get(args[0]);
-        source     =Files.readAllBytes(source_path);
+		Path   source_path;
+		byte[] source;
 
-        int lane_count,stack_length;
+		source_path=Paths.get(args[0]);
+		source     =Files.readAllBytes(source_path);
 
-        lane_count  =1<< 2;
-        stack_length=1<<16;
+		//
+		// create and initialize the executor.
+		// -----------------------------------
+		//
 
-        flux_executor=new FluxExecutor(source,lane_count,stack_length);
+		int          stack_length;
+		FluxExecutor flux_executor;
+		FluxStatus   flux_status;
 
-        int[][] source_buffer_pool=new int[2][1024];
+		stack_length=1<<16; // 64k elements.
 
-        flux_executor.execute(source_buffer_pool);
+		flux_executor=new FluxExecutor(source,stack_length);
 
-		/*
-		flux_executor=new FluxExecutor(source,lane_count,buffer_count,buffer_sizes,buffer_index,dstack_size,jstack_size);
-		flux_status  =flux_executor.execute(buffer, buffer_size);
-		*/
-    }
+		//
+		// execute the source.
+		// -------------------
+		//
+		// TODO: this should be given a pool of buffers in the rewrite.
+		//
+
+		flux_executor.execute();
+	}
 }
