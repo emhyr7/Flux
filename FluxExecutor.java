@@ -203,7 +203,7 @@ public class FluxExecutor
 	// compile and execute the source.
 	// -------------------------------
 	//
-	public FluxStatus execute(int[][] source_buffer_pool) throws Exception
+	public FluxStatus execute() throws Exception
 	{
 		FluxStatus status;
 
@@ -452,6 +452,9 @@ public class FluxExecutor
 
 			switch(word)
 			{
+				// from case ADD to case DIV, is just popping two operands from the
+				// stack, perform the operation, then store the result on the stack.
+				// then print the full operation because why not.
 			case BUILTIN_WORD_ADD:
 				{
 					if(this.stack_mass<2)throw new Exception("stack underflow");
@@ -493,6 +496,10 @@ public class FluxExecutor
 				}
 				break;
 			default:
+				// in this case, the word might be a number, or an undefined word which
+				// theoretically shouldn't've been emitted.
+				//
+				// in the case of a number, just push the number onto the stack.
 				{
 					int h,l;
 
@@ -548,7 +555,10 @@ public class FluxExecutor
 			}
 		}
 
-		// finally.
+		// finish.
+		// print the result.
+		// if there is no result (i.e., the stack is empty), an exception is thrown
+		// because no results is definitely unintentional.
 		if(this.stack_mass<1)throw new Exception("stack is empty");
 		System.out.println("result:"+this.stack[--this.stack_mass]);
 
@@ -588,9 +598,8 @@ public class FluxExecutor
 		System.out.print(""+a+b+" ");
 	}
 
-	//
-	//
-	//
+	// inlines all the words to effectively populate `word_buffer` with elementary
+	// words.
 	private int inline_words(int offset)
 	{
 		boolean do_ret,do_skip_to_ret;
@@ -598,14 +607,24 @@ public class FluxExecutor
 		do_ret=false;
 		do_skip_to_ret=false;
 
+		//
+		// essentially, recursively for each user-defined word, emit the elementary
+		// builtin words into the word buffer.
+		//
+		// effectively, the word buffer will just contain a sequence of builtin
+		// words.
+		//
+
 		for(;offset<this.source.length;offset+=2)
 		{
 			short word;
 
+			// unravel from the current recursion upon the `;`.
 			if(do_ret)break;
 
 			word=load_word(this.source,offset);
 
+			// skip words up to the `;`.
 			if(do_skip_to_ret&&word!=BUILTIN_WORD_RET)continue;
 
 			switch(word)
@@ -614,15 +633,32 @@ public class FluxExecutor
 				{
 					short new_word;
 
+					//
+					// enter the identifier and offset of the word.
+					// --------------------------------------------
+					//
+					// Fig. 1:
+					//
+					// `:` <identifier> {words ...} `;`
+					//  ^  ^            ^-->---------^
+					//  A  B            C            D
+					//
+
+					// the next word should be the identifier of the new word, which is
+					// visualized as B in the figure above.
 					new_word=load_word(this.source,offset+2);
 
+					// the next next word is the start of the new word's definition, which
+					// is visualized as C in the figure above.
 					this.word_table[new_word]=offset+2+2;
 
+					// skip the definition, which is visualized by D in the figure above.
 					do_skip_to_ret=true;
 				}
 				break;
 			case BUILTIN_WORD_RET:
 				{
+					// unravel from the current recursion upon the `;`.
 					do_ret=true;
 				}
 				break;
@@ -634,16 +670,17 @@ public class FluxExecutor
 
 					if(word_offset==WORD_OFFSET_BUILTIN)
 					{
+						// emit the builtin word.
 						this.word_buffer[this.word_count]=word;
 						this.word_count+=1;
 					}
 					else if(word_offset==WORD_OFFSET_UNDEFINED)
 					{
-						// IGNORE.
+						// we ignore undefined words.
 					}
 					else
 					{
-						// RECURSE.
+						// we found a user-defined word, so recurse to inline it.
 
 						this.inline_words(word_offset);
 					}
