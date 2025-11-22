@@ -4,12 +4,6 @@ import java.util.concurrent.CyclicBarrier;
 
 public class FluxExecutor
 {
-
-	public enum Status
-	{
-		SUCCESSFUL,
-	}
-
 	public enum BuiltinWord
 	{
 		ST,
@@ -30,7 +24,8 @@ public class FluxExecutor
 	public static final int WORD_COUNT_MAX=1<<16; // 64 kB
 	public static final int WORD_SIZE_MAX =1<< 1; // 2   B
 
-	public static final int WORD_OFFSET_BUILTIN=-1;
+	public static final int WORD_OFFSET_UNDEFINED= 0; // THIS CAN BE 0 BECAUSE THERE MUST BE A `:` TO DEFINE A NON-BUILTIN WORD, THEREFORE, A WORD'S OFFEST SHOULD NEVER BE 0.
+	public static final int WORD_OFFSET_BUILTIN  =-1;
 
 	public static final byte CHARACTER_NULL ='\0';
 	public static final byte CHARACTER_SPACE=' ';
@@ -40,7 +35,13 @@ public class FluxExecutor
 
 	private byte[] source;
 
+	private short[] word_buffer;
+	private int     word_count;
+
 	private int[][] lane_stack_table;
+
+	private int[] stack;
+	private int stack_mass;
 
 	private Thread[]      thread_pool;
 	private CyclicBarrier thread_pool_barrier;
@@ -48,18 +49,18 @@ public class FluxExecutor
 	// NOTE: offset by words, not by bytes.
 	private int[] word_offset_table=new int[WORD_COUNT_MAX];
 
-	private short BUILTIN_WORD_ST  =('.'<<0)|(' '<<8);
-	private short BUILTIN_WORD_LD  =('@'<<0)|(' '<<8);
-	private short BUILTIN_WORD_SYNC=('='<<0)|(' '<<8);
-	private short BUILTIN_WORD_DEF =(':'<<0)|(' '<<8);
-	private short BUILTIN_WORD_RET =(';'<<0)|(' '<<8);
-	private short BUILTIN_WORD_ADD =('+'<<0)|(' '<<8);
-	private short BUILTIN_WORD_SUB =('-'<<0)|(' '<<8);
-	private short BUILTIN_WORD_MUL =('*'<<0)|(' '<<8);
-	private short BUILTIN_WORD_DIV =('/'<<0)|(' '<<8);
-	private short BUILTIN_WORD_REM =('%'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_ST  =('.'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_LD  =('@'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_SYNC=('='<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_DEF =(':'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_RET =(';'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_ADD =('+'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_SUB =('-'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_MUL =('*'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_DIV =('/'<<0)|(' '<<8);
+	private static final short BUILTIN_WORD_REM =('%'<<0)|(' '<<8);
 
-	private final short[] BUILTIN_WORD_INDEX_LIST=new short[]
+	private static final short[] BUILTIN_WORD_INDEX_LIST=new short[]
 	{
 		BUILTIN_WORD_ST,
 		BUILTIN_WORD_LD,
@@ -88,13 +89,23 @@ public class FluxExecutor
 	{
 		this.source=new byte[alignr(1+source.length+64,64)];
 
+		this.word_buffer=new short[this.source.length/2];
+		this.word_count=0;
+
 		System.arraycopy(source,0,this.source,1,source.length);
 		this.source[0]=CHARACTER_NULL;
 
 		this.lane_stack_table=new int[lane_count][PADDING_SIZE+stack_length+PADDING_SIZE];
+		this.stack=new int[stack_length+PADDING_SIZE];
+		this.stack_mass=0;
 
 		this.thread_pool        =new Thread[lane_count];
 		this.thread_pool_barrier=new CyclicBarrier(lane_count);
+
+		for(int i=0;i<this.word_offset_table.length;i+=1)
+		{
+			this.word_offset_table[i]=WORD_OFFSET_UNDEFINED;
+		}
 
 		//enter builtin words.
 		for(short word_index:BUILTIN_WORD_INDEX_LIST)
@@ -137,11 +148,11 @@ public class FluxExecutor
 		*/
 	}
 
-	public Status execute(int[][] source_buffer_pool)
+	public FluxStatus execute(int[][] source_buffer_pool) throws Exception
 	{
-		Status status;
+		FluxStatus status;
 
-		status=Status.SUCCESSFUL;
+		status=FluxStatus.SUCCESSFUL;
 
 		this.print_source("initial state.");
 
@@ -320,39 +331,139 @@ public class FluxExecutor
 		// get the word count.
 
 		this.sync();
+
+
+		System.out.println("================================================");
+		for(int i=0;i<this.source.length;)
 		{
-			int i;
+			i=this.inline_words(i);
+		}
 
-			word_count=0;
+		for(int i=0;i<this.word_count;i+=1)
+		{
+			short word;
+			word=this.word_buffer[i];
+			print_word(word);
+		}
+		System.out.println("\n================================================");
 
-			for(i=0;i<this.source.length;i+=2)
+		for(int i=0;i<this.word_count;i+=1)
+		{
+			short word;
+
+			word=this.word_buffer[i];
+
+			int a,b,v;
+
+			switch(word)
 			{
-				byte    character;
-				boolean is_end;
+			case BUILTIN_WORD_ADD:
+				{
+					if(this.stack_mass<2)throw new Exception("stack underflow");
+					a=this.stack[--this.stack_mass];
+					b=this.stack[--this.stack_mass];
+					v=a+b;
+					this.stack[this.stack_mass++]=v;
+					System.out.println(""+a+"+"+b+"="+v);
+				}
+				break;
+			case BUILTIN_WORD_SUB:
+				{
+					if(this.stack_mass<2)throw new Exception("stack underflow");
+					a=this.stack[--this.stack_mass];
+					b=this.stack[--this.stack_mass];
+					v=a-b;
+					this.stack[this.stack_mass++]=v;
+					System.out.println(""+a+"-"+b+"="+v);
+				}
+				break;
+			case BUILTIN_WORD_MUL:
+				{
+					if(this.stack_mass<2)throw new Exception("stack underflow");
+					a=this.stack[--this.stack_mass];
+					b=this.stack[--this.stack_mass];
+					v=a*b;
+					this.stack[this.stack_mass++]=v;
+					System.out.println(""+a+"*"+b+"="+v);
+				}
+				break;
+			case BUILTIN_WORD_DIV:
+				{
+					if(this.stack_mass<2)throw new Exception("stack underflow");
+					a=this.stack[--this.stack_mass];
+					b=this.stack[--this.stack_mass];
+					v=a/b;
+					this.stack[this.stack_mass++]=v;
+					System.out.println(""+a+"/"+b+"="+v);
+				}
+				break;
+			default:
+				{
+					// check if the word is a number!!
 
-				character=this.source[i];
-				is_end=character==CHARACTER_NULL;
-				word_count+=is_end?0:1;
+					boolean word_is_numeric;
+					{
+						int h,l;
+
+						l=(word>>0)&0xFF;
+						h=(word>>8)&0xFF;
+
+						word_is_numeric =(l>='A'&&l<='F')||(l>='0'&&l<='9');
+						word_is_numeric&=(h>='A'&&h<='F')||(h>='0'&&h<='9');
+					}
+
+					if(word_is_numeric)
+					{
+						int h,l;
+						boolean p;
+
+						h =(word>>0)&0xFF;
+						p =h>='A'&&h<='Z';
+						h-=p?'A':'0';
+						h+=p?10:0;
+
+						l =(word>>8)&0xFF;
+						p =l>='A'&&l<='Z';
+						l-=p?'A':'0';
+						l+=p?10:0;
+
+						v=(h<<4)|(l&0xFF);
+
+						// TODO: convert word into value
+
+						this.stack[this.stack_mass++]=v;
+					}
+					else
+					{
+
+						print_word(word);
+						throw new Exception("wtf kinda word wtf");
+					}
+				}
+				break;
 			}
 		}
 
-		this.sync();
-		for(int i=0;i<word_count;i+=1)
+		if(this.stack_mass<1)throw new Exception("stack is empty");
+		System.out.println("result:"+this.stack[--this.stack_mass]);
+
+
+		/*
+		for(int i=0;i<this.word_count;i+=1)
 		{
-			short   current_word,word_word;
-			boolean do_define;
+			short word=this.word_buffer[i];
+			char a,b;
 
-			current_word =(short)(this.source[i*2+0]<<(0*8));
-			current_word|=(short)(this.source[i*2+1]<<(1*8));
-
-			if(current_word==BUILTIN_WORD_DEF)
-			{
-				word_word =(short)(this.source[(i+1)*2+0]<<(0*8));
-				word_word|=(short)(this.source[(i+1)*2+1]<<(1*8));
-
-				this.word_offset_table[word_word]=i+1;
-			}
+			a=(char)((word>>0)&0xFF);
+			b=(char)((word>>8)&0xFF);
+			System.out.print(" "+a+b);
 		}
+		*/
+		
+
+		// TODO: inline all words.
+
+		
 
 		// TODO: inline all words.
 
@@ -533,5 +644,164 @@ public class FluxExecutor
 	private void sync()
 	{
 		// dummb.
+	}
+
+	private static short load_word(byte[] buffer, int i)
+	{
+		short word;
+		word =(short)(buffer[i+0]<<(0*8));
+		word|=(short)(buffer[i+1]<<(1*8));
+		return word;
+	}
+
+	private int inline_words(int offset)
+	{
+		boolean do_ret,do_skip_to_ret;
+
+		do_ret=false;
+		do_skip_to_ret=false;
+
+		for(;offset<this.source.length;offset+=2)
+		{
+			short word;
+
+			if(do_ret)break;
+
+			word=load_word(this.source,offset);
+
+			if(do_skip_to_ret&&word!=BUILTIN_WORD_RET)continue;
+
+			switch(word)
+			{
+			case BUILTIN_WORD_DEF:
+				{
+					short new_word;
+
+					new_word=load_word(this.source,offset+2);
+
+					this.word_offset_table[new_word]=offset+2+2;
+
+					do_skip_to_ret=true;
+				}
+				break;
+			case BUILTIN_WORD_RET:
+				{
+					do_ret=true;
+				}
+				break;
+			default:
+				{
+					int word_offset;
+
+					word_offset=this.word_offset_table[word];
+
+					if(word_offset==WORD_OFFSET_BUILTIN)
+					{
+						this.word_buffer[this.word_count]=word;
+						this.word_count+=1;
+					}
+					else if(word_offset==WORD_OFFSET_UNDEFINED)
+					{
+						// IGNORE.
+					}
+					else
+					{
+						// RECURSE.
+
+						this.inline_words(word_offset);
+					}
+				}
+				break;
+			}
+		}
+
+		return offset;
+	}
+
+	private int preprocess_words(int offset)
+	{
+		boolean do_skip_until_ret,do_ret;
+
+		do_skip_until_ret=false;
+		do_ret=false;
+
+		int i;
+		for(i=offset;i<this.source.length;i+=2)
+		{
+			short   word;
+			int     word_offset;
+
+			word       =load_word(this.source,i);
+			word_offset=this.word_offset_table[word];
+
+			print_word(word);
+
+			if(do_ret)
+			{
+				break;
+			}
+			else if(do_skip_until_ret)
+			{
+				do_skip_until_ret=word!=BUILTIN_WORD_RET;
+				do_ret=word==BUILTIN_WORD_RET;
+			}
+			else if(word_offset==WORD_OFFSET_BUILTIN)
+			{
+				switch(word)
+				{
+				case BUILTIN_WORD_DEF:
+					{
+						short new_word;
+						int   new_word_name_offset,new_word_offset;
+
+						//
+						// NOTE: despite us using indices that may be greater than the
+						// source's length, we won't ever pass it.
+						//
+
+						new_word_name_offset=i+2;
+						new_word_offset     =new_word_name_offset+2;
+
+						new_word=load_word(this.source,new_word_name_offset);
+
+						//this.print_word(new_word);
+
+						this.word_offset_table[new_word]=new_word_offset;
+
+						do_skip_until_ret=true;
+					}
+
+					break;
+
+				default:
+					{
+			
+						this.word_buffer[this.word_count]=word;
+
+						this.word_count+=1;
+					}
+
+					break;
+				}
+			}
+			else if(word_offset==WORD_OFFSET_UNDEFINED)
+			{
+				// just do nothing.
+			}
+			else
+			{
+				this.preprocess_words(word_offset);
+			}
+		}
+
+		return i;
+	}
+
+	private static void print_word(short word)
+	{
+		char a,b;
+		a=(char)((word>>0)&0xFF);
+		b=(char)((word>>8)&0xFF);
+		System.out.print(""+a+b+" ");
 	}
 }
