@@ -1,0 +1,5 @@
+: ## ;
+
+##_THIS_PRINTS_67_IN_DECIMAL_LOL
+
+40 05 +
